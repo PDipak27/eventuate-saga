@@ -1,0 +1,22 @@
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
+            <evaluator class="ch.qos.logback.classic.boolex.JaninoEventEvaluator">
+                <!-- Exclude logs containing the table name 'USER_TABLE' -->
+                <expression>return (message.contains("_entry") || message.contains("utbox")  );</expression>
+            </evaluator>
+            <OnMismatch>NEUTRAL</OnMismatch>
+            <OnMatch>DENY</OnMatch>
+        </filter>
+        <encoder><pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern></encoder>
+    </appender>
+    <logger name="org.hibernate.SQL" level="DEBUG" />
+    <logger name="com.saga" level="DEBUG" />
+	<logger name="org.axonframework" level="INFO" />
+	
+	<root level="info">
+    <appender-ref ref="STDOUT" />
+	</root>
+
+
+</configuration>

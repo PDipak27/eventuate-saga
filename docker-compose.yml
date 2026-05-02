@@ -1,0 +1,81 @@
+
+
+# App services — restart freely during development.
+# Requires infra services to already be running:
+#   docker-compose -f docker-compose-infra.yml up -d
+#
+#   Start:   docker-compose up -d
+#   Restart: docker-compose down -v && docker-compose up -d
+#   Stop:    docker-compose down -v
+
+# Connects to the infra network where zookeeper and rabbitmq live
+
+
+services:
+
+  eventuate-cdc:
+    image: eventuateio/eventuate-cdc-service:0.16.0.RELEASE
+    container_name: eventuate-cdc
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/actuator/health | grep -q UP || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    environment:
+      SPRING_PROFILES_ACTIVE: EventuatePolling,RabbitMQ
+      EVENTUATE_DATABASE_SCHEMA: public
+      RABBITMQ_BROKER_ADDRESSES: host.docker.internal:5672
+      EVENTUATE_RABBITMQ_PARTITION_COUNT: 2
+      EVENTUATELOCAL_ZOOKEEPER_CONNECTION_STRING: host.docker.internal:2181
+
+      # orderdb
+      EVENTUATE_CDC_PIPELINE_PIPELINE1_TYPE: eventuate-tram
+      EVENTUATE_CDC_PIPELINE_PIPELINE1_READER: orderReader
+      EVENTUATE_CDC_PIPELINE_PIPELINE1_EVENTUATEDATABASESCHEMA: public
+      EVENTUATE_CDC_READER_ORDERREADER_TYPE: polling
+      EVENTUATE_CDC_READER_ORDERREADER_DATASOURCEURL: jdbc:postgresql://host.docker.internal:5432/orderdb_tram
+      EVENTUATE_CDC_READER_ORDERREADER_DATASOURCEUSERNAME: postgres
+      EVENTUATE_CDC_READER_ORDERREADER_DATASOURCEPASSWORD: postgres
+      EVENTUATE_CDC_READER_ORDERREADER_DATASOURCEDRIVERCLASSNAME: org.postgresql.Driver
+      EVENTUATE_CDC_READER_ORDERREADER_LEADERSHIPLOCKPATH: /eventuatelocal/cdc/leader/order
+      EVENTUATE_CDC_READER_ORDERREADER_OUTBOXID: 1
+
+      # consumerdb
+      EVENTUATE_CDC_PIPELINE_PIPELINE2_TYPE: eventuate-tram
+      EVENTUATE_CDC_PIPELINE_PIPELINE2_READER: consumerReader
+      EVENTUATE_CDC_PIPELINE_PIPELINE2_EVENTUATEDATABASESCHEMA: public
+      EVENTUATE_CDC_READER_CONSUMERREADER_TYPE: polling
+      EVENTUATE_CDC_READER_CONSUMERREADER_DATASOURCEURL: jdbc:postgresql://host.docker.internal:5432/consumerdb_tram
+      EVENTUATE_CDC_READER_CONSUMERREADER_DATASOURCEUSERNAME: postgres
+      EVENTUATE_CDC_READER_CONSUMERREADER_DATASOURCEPASSWORD: postgres
+      EVENTUATE_CDC_READER_CONSUMERREADER_DATASOURCEDRIVERCLASSNAME: org.postgresql.Driver
+      EVENTUATE_CDC_READER_CONSUMERREADER_LEADERSHIPLOCKPATH: /eventuatelocal/cdc/leader/consumer
+      EVENTUATE_CDC_READER_CONSUMERREADER_OUTBOXID: 2
+
+      # kitchendb
+      EVENTUATE_CDC_PIPELINE_PIPELINE3_TYPE: eventuate-tram
+      EVENTUATE_CDC_PIPELINE_PIPELINE3_READER: kitchenReader
+      EVENTUATE_CDC_PIPELINE_PIPELINE3_EVENTUATEDATABASESCHEMA: public
+      EVENTUATE_CDC_READER_KITCHENREADER_TYPE: polling
+      EVENTUATE_CDC_READER_KITCHENREADER_DATASOURCEURL: jdbc:postgresql://host.docker.internal:5432/kitchendb_tram
+      EVENTUATE_CDC_READER_KITCHENREADER_DATASOURCEUSERNAME: postgres
+      EVENTUATE_CDC_READER_KITCHENREADER_DATASOURCEPASSWORD: postgres
+      EVENTUATE_CDC_READER_KITCHENREADER_DATASOURCEDRIVERCLASSNAME: org.postgresql.Driver
+      EVENTUATE_CDC_READER_KITCHENREADER_LEADERSHIPLOCKPATH: /eventuatelocal/cdc/leader/kitchen
+      EVENTUATE_CDC_READER_KITCHENREADER_OUTBOXID: 3
+
+      # accountingdb
+      EVENTUATE_CDC_PIPELINE_PIPELINE4_TYPE: eventuate-tram
+      EVENTUATE_CDC_PIPELINE_PIPELINE4_READER: accountingReader
+      EVENTUATE_CDC_PIPELINE_PIPELINE4_EVENTUATEDATABASESCHEMA: public
+      EVENTUATE_CDC_READER_ACCOUNTINGREADER_TYPE: polling
+      EVENTUATE_CDC_READER_ACCOUNTINGREADER_DATASOURCEURL: jdbc:postgresql://host.docker.internal:5432/accountingdb_tram
+      EVENTUATE_CDC_READER_ACCOUNTINGREADER_DATASOURCEUSERNAME: postgres
+      EVENTUATE_CDC_READER_ACCOUNTINGREADER_DATASOURCEPASSWORD: postgres
+      EVENTUATE_CDC_READER_ACCOUNTINGREADER_DATASOURCEDRIVERCLASSNAME: org.postgresql.Driver
+      EVENTUATE_CDC_READER_ACCOUNTINGREADER_LEADERSHIPLOCKPATH: /eventuatelocal/cdc/leader/accounting
+      EVENTUATE_CDC_READER_ACCOUNTINGREADER_OUTBOXID: 4
+
+volumes:
+  postgres-data:

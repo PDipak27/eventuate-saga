@@ -1,0 +1,13 @@
+# Maven build output
+target/
+
+# Eclipse IDE
+.classpath
+.project
+.settings/
+
+# Claude Code tool config (machine-local)
+.claude/
+
+# Debug / runtime log artifacts
+db-init/rabbitmq-error.txt
