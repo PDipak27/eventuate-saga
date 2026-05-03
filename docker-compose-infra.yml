@@ -50,7 +50,52 @@ services:
       retries: 5
       start_period: 30s
 
+  # ── Observability stack ──────────────────────────────────────────────────
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100"   # HTTP API + push endpoint used by OTel Collector
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3100/ready | grep -q ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  otel-collector:
+    # otelcol-contrib includes the filelog receiver and loki exporter.
+    # The standard otelcol image does NOT — contrib is required.
+    image: otel/opentelemetry-collector-contrib:0.105.0
+    container_name: otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      # Mount Docker's container log directory so the filelog receiver can tail logs.
+      # On Docker Desktop (Windows/Mac) this path exists inside the Linux VM
+      # and is accessible to containers running within it.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    ports:
+      - "13133:13133"   # OTel Collector health-check endpoint
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:13133 | grep -q '\"status\":\"Server available\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   zookeeper-data:
   zookeeper-log:
   rabbitmq-data:
+  loki-data:

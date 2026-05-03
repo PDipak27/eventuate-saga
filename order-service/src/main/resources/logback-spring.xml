@@ -1,22 +1,40 @@
 <configuration>
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <filter class="ch.qos.logback.core.filter.EvaluatorFilter">
-            <evaluator class="ch.qos.logback.classic.boolex.JaninoEventEvaluator">
-                <!-- Exclude logs containing the table name 'USER_TABLE' -->
-                <expression>return (message.contains("_entry") || message.contains("utbox")  );</expression>
-            </evaluator>
-            <OnMismatch>NEUTRAL</OnMismatch>
-            <OnMatch>DENY</OnMatch>
-        </filter>
-        <encoder><pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} - %msg%n</pattern></encoder>
-    </appender>
-    <logger name="org.hibernate.SQL" level="DEBUG" />
-    <logger name="com.saga" level="DEBUG" />
-	<logger name="org.axonframework" level="INFO" />
-	
-	<root level="info">
-    <appender-ref ref="STDOUT" />
-	</root>
+    <!--
+        Structured JSON logging — logstash-logback-encoder.
+        Each log line is a single JSON object on stdout.
+        OTel Collector reads it via filelog receiver and ships to Loki.
 
+        Fields emitted per line:
+          @timestamp, level, logger_name, thread_name, message,
+          stack_trace (exceptions), MDC entries, + custom "service" field.
+
+        Outbox noise (Hibernate SQL against _entry / outbox tables) is
+        silenced by setting org.hibernate.SQL to WARN.  No Janino needed.
+    -->
+
+    <springProperty scope="context" name="appName"
+                    source="spring.application.name"
+                    defaultValue="unknown-service"/>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"${appName}"}</customFields>
+            <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</timestampPattern>
+            <timeZone>UTC</timeZone>
+        </encoder>
+    </appender>
+
+    <!-- Saga application code — DEBUG so step transitions are captured in Loki -->
+    <logger name="com.saga"                    level="DEBUG"/>
+
+    <!-- Suppress Hibernate SQL to avoid outbox-table noise in Loki -->
+    <logger name="org.hibernate.SQL"           level="WARN"/>
+    <logger name="org.hibernate.orm.jdbc.bind" level="WARN"/>
+
+    <logger name="io.eventuate"                level="INFO"/>
+
+    <root level="INFO">
+        <appender-ref ref="STDOUT"/>
+    </root>
 
 </configuration>

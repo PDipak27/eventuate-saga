@@ -1,0 +1,116 @@
+# OpenTelemetry Collector — log shipping pipeline
+#
+# Flow:
+#   Docker container stdout (JSON from logstash-logback-encoder)
+#     └─ filelog receiver  (tails /var/lib/docker/containers/*/*-json.log)
+#        └─ operators parse two layers of JSON:
+#              layer 1: Docker's wrapper  { "log": "...", "stream": "stdout", "time": "..." }
+#              layer 2: logstash JSON     { "@timestamp", "level", "service", "message", ... }
+#     └─ transform processor  (marks which fields become Loki stream labels)
+#     └─ batch processor
+#     └─ loki exporter  → http://loki:3100
+#
+# Loki stream labels (low-cardinality, for fast querying):
+#   service   — e.g. order-service, consumer-service
+#   level     — DEBUG / INFO / WARN / ERROR
+#
+# All other JSON fields land in Loki's structured metadata and are
+# searchable with | json or | logfmt line filters.
+
+receivers:
+  filelog:
+    # Docker writes one JSON object per log line at this path inside the VM.
+    # The collector container must mount /var/lib/docker/containers as a
+    # read-only volume (see docker-compose-infra.yml).
+    include:
+      - /var/lib/docker/containers/*/*.log
+    start_at: beginning
+    include_file_path: true
+    include_file_name: false
+
+    operators:
+      # ── Layer 1: parse Docker's outer JSON wrapper ──────────────────────
+      # Input:  {"log":"{...logstash json...}\n","stream":"stdout","time":"..."}
+      - type: json_parser
+        id: parse_docker_wrapper
+        timestamp:
+          parse_from: attributes.time
+          layout_type: strptime
+          layout: "%Y-%m-%dT%H:%M:%S.%LZ"
+
+      # Move the inner log string to body, dropping Docker's "stream" field
+      - type: move
+        from: attributes.log
+        to: body
+
+      # Strip the trailing newline Docker appends
+      - type: regex_parser
+        id: trim_newline
+        regex: '^(?P<clean_body>[\s\S]*?)[\n\r]*$'
+        parse_from: body
+      - type: move
+        from: attributes.clean_body
+        to: body
+
+      # ── Layer 2: parse logstash-logback-encoder JSON ─────────────────────
+      # Input body: {"@timestamp":"...","level":"INFO","service":"order-service","message":"..."}
+      - type: json_parser
+        id: parse_logstash_json
+        parse_from: body
+        on_error: send_quiet  # non-JSON lines (e.g. from other containers) pass through as-is
+
+      # Promote "service" to a resource attribute so the loki exporter
+      # can use it as a stream label
+      - type: move
+        from: attributes.service
+        to: resource["service.name"]
+        if: 'attributes["service"] != nil'
+
+      # Normalise log level to OTel's log.level convention
+      - type: move
+        from: attributes.level
+        to: attributes["log.level"]
+        if: 'attributes["level"] != nil'
+
+processors:
+  # Mark which resource attributes become Loki stream labels.
+  # Low-cardinality only — high-cardinality fields belong in log body.
+  transform:
+    log_statements:
+      - context: resource
+        statements:
+          - set(attributes["loki.resource.labels"], "service.name")
+      - context: log
+        statements:
+          - set(attributes["loki.attribute.labels"], "log.level")
+
+  # Batch before export to reduce HTTP round-trips to Loki
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+exporters:
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    # Don't add the default "exporter" / "job" labels — we control labels above
+    default_labels_enabled:
+      exporter: false
+      job:      false
+      instance: false
+      level:    false  # we set this manually via loki.attribute.labels
+
+  # Optional: debug exporter — uncomment to print every log record to collector stdout
+  # debug:
+  #   verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+
+service:
+  extensions: [health_check]
+  pipelines:
+    logs:
+      receivers:  [filelog]
+      processors: [transform, batch]
+      exporters:  [loki]

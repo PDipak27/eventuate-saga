@@ -1,0 +1,50 @@
+# Loki — single-process mode, filesystem storage
+# Suitable for local development and CI.
+# For production: switch to S3/GCS object store + replicated deployment.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory:  /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# Schema v13 on TSDB — recommended for Loki 3.x
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store:        tsdb
+      object_store: filesystem
+      schema:       v13
+      index:
+        prefix: index_
+        period: 24h
+
+# Keep logs for 7 days locally
+limits_config:
+  retention_period:        168h
+  allow_structured_metadata: true   # needed for OTel structured metadata
+  volume_enabled:          true     # enables log volume queries in Grafana
+
+ruler:
+  alertmanager_url: http://localhost:9093
+
+# Embedded cache to speed up range queries
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled:     true
+        max_size_mb: 100

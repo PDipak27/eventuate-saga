@@ -25,6 +25,7 @@
         <spring-boot.version>3.2.3</spring-boot.version>
         <eventuate.tram.version>0.36.0.RELEASE</eventuate.tram.version>
         <eventuate.tram.sagas.version>0.26.0.RELEASE</eventuate.tram.sagas.version>
+        <logstash-encoder.version>7.4</logstash-encoder.version>
     </properties>
 
     <repositories>
@@ -75,6 +76,13 @@
                 <groupId>com.saga</groupId>
                 <artifactId>saga-common-eventuate</artifactId>
                 <version>1.2.0</version>
+            </dependency>
+
+            <!-- Structured JSON logging — replaces plain-text Logback encoder -->
+            <dependency>
+                <groupId>net.logstash.logback</groupId>
+                <artifactId>logstash-logback-encoder</artifactId>
+                <version>${logstash-encoder.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
