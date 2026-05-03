@@ -9,6 +9,7 @@ import io.eventuate.tram.commands.consumer.CommandHandlers;
 import io.eventuate.tram.commands.consumer.CommandMessage;
 import io.eventuate.tram.messaging.common.Message;
 import io.eventuate.tram.sagas.participant.SagaCommandHandlersBuilder;
+import io.micrometer.core.annotation.Timed;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,11 @@ import static io.eventuate.tram.commands.consumer.CommandHandlerReplyBuilder.wit
  *   Eventuate deduplicates by message_id in received_messages (same transaction).
  *   CreateTicket: existsById check prevents duplicate INSERT on retry.
  *   ApproveTicket / RejectTicket: status checks prevent redundant updates.
+ *
+ * Metrics:
+ *   @Timed("saga.command.create_ticket")  — latency histogram for ticket creation
+ *   @Timed("saga.command.approve_ticket") — latency histogram for ticket approval
+ *   @Timed("saga.command.reject_ticket")  — latency histogram for compensation step
  */
 @Component
 @RequiredArgsConstructor
@@ -41,6 +47,7 @@ public class KitchenCommandHandlers {
                 .build();
     }
 
+    @Timed(value = "saga.command.create_ticket", description = "Time taken to handle CreateTicketCommand")
     @Transactional
     public Message createTicket(CommandMessage<CreateTicketCommand> cm) {
         CreateTicketCommand cmd = cm.getCommand();
@@ -74,6 +81,7 @@ public class KitchenCommandHandlers {
         return withSuccess(new TicketCreatedReply("created"));
     }
 
+    @Timed(value = "saga.command.approve_ticket", description = "Time taken to handle ApproveTicketCommand")
     @Transactional
     public Message approveTicket(CommandMessage<ApproveTicketCommand> cm) {
         ApproveTicketCommand cmd = cm.getCommand();
@@ -94,6 +102,7 @@ public class KitchenCommandHandlers {
         return withSuccess(new TicketApprovedReply("approved"));
     }
 
+    @Timed(value = "saga.command.reject_ticket", description = "Time taken to handle RejectTicketCommand (compensation)")
     @Transactional
     public Message rejectTicket(CommandMessage<RejectTicketCommand> cm) {
         RejectTicketCommand cmd = cm.getCommand();

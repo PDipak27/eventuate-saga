@@ -10,7 +10,9 @@ import io.eventuate.tram.commands.consumer.CommandHandlers;
 import io.eventuate.tram.commands.consumer.CommandMessage;
 import io.eventuate.tram.messaging.common.Message;
 import io.eventuate.tram.sagas.participant.SagaCommandHandlersBuilder;
-import lombok.RequiredArgsConstructor;
+import io.micrometer.core.annotation.Timed;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,14 +29,34 @@ import static io.eventuate.tram.commands.consumer.CommandHandlerReplyBuilder.wit
  *   so it is naturally idempotent: same inputs always produce same reply.
  *   In a production system that deducts credit, add an authorization_records table
  *   keyed on orderId to prevent double-deduction on retry.
+ *
+ * Metrics:
+ *   @Timed("saga.command.authorize_card") — latency histogram for the pivot step
+ *   saga.authorization.result{outcome=authorized|failed} — outcome counter
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class AccountingCommandHandlers {
 
     private final AccountRepository accountRepository;
     private final AuthorizationRecordRepository authorizationRecordRepository;
+    private final Counter authAuthorizedCounter;
+    private final Counter authFailedCounter;
+
+    public AccountingCommandHandlers(AccountRepository accountRepository,
+                                     AuthorizationRecordRepository authorizationRecordRepository,
+                                     MeterRegistry registry) {
+        this.accountRepository            = accountRepository;
+        this.authorizationRecordRepository = authorizationRecordRepository;
+        this.authAuthorizedCounter = Counter.builder("saga.authorization.result")
+                .description("Outcome of credit card authorization at the saga pivot step")
+                .tag("outcome", "authorized")
+                .register(registry);
+        this.authFailedCounter = Counter.builder("saga.authorization.result")
+                .description("Outcome of credit card authorization at the saga pivot step")
+                .tag("outcome", "failed")
+                .register(registry);
+    }
 
     public CommandHandlers commandHandlers() {
         return SagaCommandHandlersBuilder
@@ -43,6 +65,7 @@ public class AccountingCommandHandlers {
                 .build();
     }
 
+    @Timed(value = "saga.command.authorize_card", description = "Time taken to handle AuthorizeCreditCardCommand (pivot)")
     @Transactional
     public Message authorizeCard(CommandMessage<AuthorizeCreditCardCommand> cm) {
         AuthorizeCreditCardCommand cmd = cm.getCommand();
@@ -75,9 +98,10 @@ public class AccountingCommandHandlers {
             record.setAuthorized(false);
             record.setFailureReason("No account found for consumer");
             authorizationRecordRepository.save(record);
+            authFailedCounter.increment();
             return withFailure(new CardAuthorizationFailedReply("No account found for consumer"));
         }
- 
+
         if (account.getAvailableCredit().compareTo(cmd.getOrderTotal()) < 0) {
             String reason = String.format("Insufficient credit. Available: %s, Required: %s",
                     account.getAvailableCredit(), cmd.getOrderTotal());
@@ -85,11 +109,13 @@ public class AccountingCommandHandlers {
             record.setAuthorized(false);
             record.setFailureReason(reason);
             authorizationRecordRepository.save(record);
+            authFailedCounter.increment();
             return withFailure(new CardAuthorizationFailedReply(reason));
         }
- 
+
         record.setAuthorized(true);
         authorizationRecordRepository.save(record);
+        authAuthorizedCounter.increment();
         log.info("[PIVOT OK] Card authorized consumerId={} orderId={}", cmd.getConsumerId(), cmd.getOrderId());
         return withSuccess(new CardAuthorizedReply("authorized"));
     }

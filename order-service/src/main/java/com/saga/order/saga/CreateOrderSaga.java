@@ -5,6 +5,8 @@ import com.saga.common.reply.*;
 import io.eventuate.tram.commands.consumer.CommandWithDestination;
 import io.eventuate.tram.sagas.orchestration.SagaDefinition;
 import io.eventuate.tram.sagas.simpledsl.SimpleSaga;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -26,10 +28,43 @@ import static io.eventuate.tram.commands.consumer.CommandWithDestinationBuilder.
  *   Step 3 authorizeCard   — PIVOT (no compensation; if passes, saga guaranteed to complete)
  *   Step 4 approveTicket   — retriable
  *   Step 5 approveOrder    — retriable
+ *
+ * Metrics (programmatic — AOP cannot reach private methods):
+ *   saga.create_order.started            — incremented when step 1 command is dispatched
+ *   saga.create_order.failed{reason}     — incremented on each failure reply (before compensation)
+ *   saga.create_order.compensation       — incremented each time the RejectOrder compensation fires
  */
 @Component
 @Slf4j
 public class CreateOrderSaga implements SimpleSaga<CreateOrderSagaData> {
+
+    // ── Micrometer counters ───────────────────────────────────────────────────
+    private final Counter sagaStartedCounter;
+    private final Counter compensationCounter;
+    private final Counter failedConsumerCounter;
+    private final Counter failedTicketCounter;
+    private final Counter failedCardCounter;
+
+    public CreateOrderSaga(MeterRegistry registry) {
+        this.sagaStartedCounter   = Counter.builder("saga.create_order.started")
+                .description("Number of CreateOrder sagas initiated")
+                .register(registry);
+        this.compensationCounter  = Counter.builder("saga.create_order.compensation")
+                .description("Number of times the RejectOrder compensation step was triggered")
+                .register(registry);
+        this.failedConsumerCounter = Counter.builder("saga.create_order.failed")
+                .description("Number of saga failures by reason")
+                .tag("reason", "consumer_verification")
+                .register(registry);
+        this.failedTicketCounter   = Counter.builder("saga.create_order.failed")
+                .description("Number of saga failures by reason")
+                .tag("reason", "ticket_creation")
+                .register(registry);
+        this.failedCardCounter     = Counter.builder("saga.create_order.failed")
+                .description("Number of saga failures by reason")
+                .tag("reason", "card_authorization")
+                .register(registry);
+    }
 
     private final SagaDefinition<CreateOrderSagaData> sagaDefinition =
         step()
@@ -61,12 +96,14 @@ public class CreateOrderSaga implements SimpleSaga<CreateOrderSagaData> {
 
     private CommandWithDestination makeVerifyConsumerCommand(CreateOrderSagaData d) {
         log.info("[SAGA Step 1] Sending VerifyConsumerCommand consumerId={}", d.getConsumerId());
+        sagaStartedCounter.increment();
         return send(new VerifyConsumerCommand(d.getConsumerId(), d.getOrderId(), d.getOrderTotal()))
                 .to(VerifyConsumerCommand.CHANNEL).build();
     }
 
     private CommandWithDestination makeRejectOrderCommand(CreateOrderSagaData d) {
         log.info("[SAGA COMPENSATE] Sending RejectOrderCommand orderId={}", d.getOrderId());
+        compensationCounter.increment();
         return send(new RejectOrderCommand(d.getOrderId(), d.getRejectionReason()))
                 .to(RejectOrderCommand.CHANNEL).build();
     }
@@ -108,6 +145,7 @@ public class CreateOrderSaga implements SimpleSaga<CreateOrderSagaData> {
 
     private void handleConsumerFailed(CreateOrderSagaData d, ConsumerVerificationFailedReply r) {
         log.warn("[SAGA FAIL] Consumer verification failed orderId={}, reason={}", d.getOrderId(), r.getMessage());
+        failedConsumerCounter.increment();
         d.setRejectionReason(r.getMessage());
     }
 
@@ -117,11 +155,13 @@ public class CreateOrderSaga implements SimpleSaga<CreateOrderSagaData> {
 
     private void handleTicketCreationFailed(CreateOrderSagaData d, TicketCreationFailedReply r) {
         log.warn("[SAGA FAIL] Ticket creation failed orderId={}, reason={}", d.getOrderId(), r.getMessage());
+        failedTicketCounter.increment();
         d.setRejectionReason(r.getMessage());
     }
 
     private void handleCardFailed(CreateOrderSagaData d, CardAuthorizationFailedReply r) {
         log.warn("[SAGA PIVOT FAIL] Card auth failed orderId={}, reason={}", d.getOrderId(), r.getMessage());
+        failedCardCounter.increment();
         d.setRejectionReason(r.getMessage());
     }
 }
