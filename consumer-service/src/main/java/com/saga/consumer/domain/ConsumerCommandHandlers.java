@@ -8,6 +8,7 @@ import io.eventuate.tram.commands.consumer.CommandHandlers;
 import io.eventuate.tram.commands.consumer.CommandMessage;
 import io.eventuate.tram.messaging.common.Message;
 import io.eventuate.tram.sagas.participant.SagaCommandHandlersBuilder;
+import io.micrometer.core.annotation.Timed;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -20,6 +21,9 @@ import static io.eventuate.tram.commands.consumer.CommandHandlerReplyBuilder.wit
  * Handles VerifyConsumerCommand — the compensatable read-only step in the saga.
  * Eventuate automatically deduplicates via received_messages (message_id PK).
  * The verification itself is read-only so duplicate execution produces same result.
+ *
+ * Metrics:
+ *   @Timed("saga.command.verify_consumer") — latency histogram for the consumer check
  */
 @Component
 @RequiredArgsConstructor
@@ -35,6 +39,7 @@ public class ConsumerCommandHandlers {
                 .build();
     }
 
+    @Timed(value = "saga.command.verify_consumer", description = "Time taken to handle VerifyConsumerCommand")
     @Transactional
     public Message verifyConsumer(CommandMessage<VerifyConsumerCommand> cm) {
         VerifyConsumerCommand cmd = cm.getCommand();
