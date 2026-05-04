@@ -20,7 +20,7 @@
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <customFields>{"service":"${appName}"}</customFields>
             <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</timestampPattern>
-            <timeZone>UTC</timeZone>
+            <timeZone>UTC+05:30</timeZone>
         </encoder>
     </appender>
 
