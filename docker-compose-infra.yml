@@ -88,7 +88,31 @@ services:
       loki:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:13133 | grep -q '\"status\":\"Server available\"' || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:13133 | grep -q '\"Server available\"' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # UI: http://localhost:3000  (admin/admin)
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"   # skip login for local dev
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      GF_FEATURE_TOGGLES_ENABLE: "lokiExploreLogsPanel"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3000/api/health | grep -q ok || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -99,3 +123,4 @@ volumes:
   zookeeper-log:
   rabbitmq-data:
   loki-data:
+  grafana-data:
